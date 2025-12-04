@@ -1,50 +1,84 @@
-# Welcome to your Expo app 👋
+# Swingatron Mobile
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Swingatron is a modern mobile music and audio application built with React Native and Expo. It features a robust audio playback system, lyrics display, and comprehensive library management.
 
-## Get started
+## Features
 
-1. Install dependencies
+- **Advanced Audio Playback**: Seamless audio streaming and playback with background support.
+- **Now Playing Interface**: Rich player interface with cover art, controls, and visualizations.
+- **Lyrics Integration**: Real-time lyrics display for supported tracks.
+- **Queue Management**: Easy management of upcoming tracks.
+- **Library Organization**: Organize music with Folders and Favorites.
+- **Stats & Insights**: View listening statistics.
+- **Modern UI/UX**: Built with smooth animations (Reanimated) and blur effects.
+- **Authentication**: User account management.
 
+## Tech Stack
+
+- **Framework**: [React Native](https://reactnative.dev/) & [Expo](https://expo.dev/) (SDK 54)
+- **Routing**: [Expo Router](https://docs.expo.dev/router/introduction/)
+- **State Management**: [Zustand](https://github.com/pmndrs/zustand)
+- **Networking**: Axios
+- **Audio**: expo-audio
+- **Storage**: expo-secure-store, @react-native-async-storage/async-storage
+- **Animations**: react-native-reanimated
+- **Styling**: expo-linear-gradient, expo-blur, expo-font
+
+## Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (LTS recommended)
+- [Bun](https://bun.sh/) (Preferred package manager)
+- [Expo Go](https://expo.dev/client) app on your mobile device (for testing)
+
+### Installation
+
+1. Clone the repository:
    ```bash
-   npm install
+   git clone <repository-url>
+   cd swingatron/mobile
    ```
 
-2. Start the app
-
+2. Install dependencies:
    ```bash
-   npx expo start
+   bun install
    ```
 
-In the output, you'll find options to open the app in a
+### Running the App
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Start the development server:
 
 ```bash
-npm run reset-project
+bun start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+- **Scan the QR code** with the Expo Go app (Android) or Camera app (iOS).
+- Press `a` to open in Android Emulator.
+- Press `i` to open in iOS Simulator.
+- Press `w` to open in web browser.
 
-## Learn more
+## Scripts
 
-To learn more about developing your project with Expo, look at the following resources:
+- `bun start`: Start the project with cache cleared.
+- `bun run android`: Run on Android device/emulator.
+- `bun run ios`: Run on iOS simulator.
+- `bun run web`: Run in web browser.
+- `bun run lint`: Run ESLint to check for code quality issues.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Project Structure
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```
+mobile/
+├── app/                 # Expo Router pages and navigation
+│   ├── (auth)/          # Authentication routes
+│   ├── (tabs)/          # Main tab navigation
+│   ├── nowplaying.tsx   # Player screen
+│   └── ...
+├── assets/              # Images, fonts, and other static assets
+├── components/          # Reusable UI components
+├── constants/           # App-wide constants (colors, theme)
+├── hooks/               # Custom React hooks
+├── src/                 # Core logic and services
+└── ...
+```
