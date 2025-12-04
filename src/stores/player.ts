@@ -3,12 +3,6 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { Audio, type AVPlaybackStatus } from "expo-av";
 import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  MediaControl,
-  PlaybackState,
-  Command,
-  type MediaControlEvent,
-} from "expo-media-control";
 import type { Track, RepeatMode } from "../api/types";
 import { logTrackPlayback } from "../api/playback";
 import { getTrackStreamUrl, getThumbnailUrl } from "../api/client";
