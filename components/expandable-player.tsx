@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   Image,
   ImageBackground,
@@ -211,6 +212,50 @@ function QueueItem({ track, isCurrent, onPress, onRemove }: QueueItemProps) {
   );
 }
 
+// animated wrapper for queue items with cascading effect
+interface AnimatedQueueItemProps extends QueueItemProps {
+  queueIndex: number; // position in the visible queue (0, 1, 2...)
+  viewTransition: { value: number };
+}
+
+function AnimatedQueueItem({
+  queueIndex,
+  viewTransition,
+  ...queueItemProps
+}: AnimatedQueueItemProps) {
+  // stagger delay based on position (max 10 items for animation)
+  const staggerDelay = Math.min(queueIndex, 10) * 0.06;
+
+  const animatedStyle = useAnimatedStyle(() => {
+    // each item animates based on viewTransition, with a staggered start
+    const adjustedProgress = interpolate(
+      viewTransition.value,
+      [staggerDelay, staggerDelay + 0.4],
+      [0, 1],
+      Extrapolation.CLAMP
+    );
+
+    const opacity = adjustedProgress;
+    const translateY = interpolate(
+      adjustedProgress,
+      [0, 1],
+      [20, 0],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      opacity,
+      transform: [{ translateY }],
+    };
+  });
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <QueueItem {...queueItemProps} />
+    </Animated.View>
+  );
+}
+
 interface ExpandablePlayerProps {
   miniPlayerBottomOffset: number; // distance from bottom of screen to mini player bottom
 }
@@ -231,19 +276,49 @@ export function ExpandablePlayer({
 
   // animated styles for queue crossfade
   const artworkViewStyle = useAnimatedStyle(() => ({
-    opacity: 1 - viewTransition.value,
-    transform: [{ translateY: viewTransition.value * -15 }],
+    opacity: interpolate(
+      viewTransition.value,
+      [0, 0.4],
+      [1, 0],
+      Extrapolation.CLAMP
+    ),
+    transform: [{ translateY: viewTransition.value * -20 }],
+    maxHeight: interpolate(
+      viewTransition.value,
+      [0, 0.3, 0.8, 1],
+      [10000, 10000, 500, 0],
+      Extrapolation.CLAMP
+    ),
+    overflow: "hidden",
   }));
 
-  const queueViewStyle = useAnimatedStyle(() => ({
-    opacity: viewTransition.value,
-    transform: [{ translateY: (1 - viewTransition.value) * 15 }],
-  }));
+  const queueViewStyle = useAnimatedStyle(() => {
+    // slide up smoothly to overlap the artwork space
+    const slideUp = interpolate(
+      viewTransition.value,
+      [0, 1],
+      [0, -(ARTWORK_SIZE + 32)],
+      Extrapolation.CLAMP
+    );
+    const opacity = interpolate(
+      viewTransition.value,
+      [0.2, 0.6],
+      [0, 1],
+      Extrapolation.CLAMP
+    );
+    return {
+      opacity,
+      transform: [{ translateY: slideUp }],
+    };
+  });
 
   // playback state
   const { position, duration, isPlaying } = usePlaybackProgress();
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const pendingTrack = usePlayerStore((s) => s.pendingTrack);
+  // use pending track for immediate metadata display when available
+  const displayTrack = pendingTrack || currentTrack;
   const albumImage = usePlayerStore((s) => s.albumImage);
   const imageCacheBuster = usePlayerStore((s) => s.imageCacheBuster);
 
@@ -287,6 +362,9 @@ export function ExpandablePlayer({
   const thumbnailUrl = displayedUrl;
 
   const isLoading = usePlayerStore((s) => s.isLoading);
+  const pendingTrackHash = usePlayerStore((s) => s.pendingTrackHash);
+  // controls should be disabled when loading a track (either isLoading or pendingTrackHash)
+  const isControlsDisabled = isLoading || !!pendingTrackHash;
   const shuffleMode = usePlayerStore((s) => s.shuffleMode);
   const repeatMode = usePlayerStore((s) => s.repeatMode);
   const queue = usePlayerStore((s) => s.queue);
@@ -498,59 +576,7 @@ export function ExpandablePlayer({
     };
   });
 
-  // artwork style - morphs from small to large
-  const artworkStyle = useAnimatedStyle(() => {
-    const size = interpolate(
-      effectiveExpansion.value,
-      [0, 1],
-      [MINI_ARTWORK_SIZE, ARTWORK_SIZE],
-      Extrapolation.CLAMP
-    );
 
-    // mini player artwork position (left aligned with padding)
-    const miniX = 12;
-    const miniY = 3 + (MINI_PLAYER_HEIGHT - 3 - MINI_ARTWORK_SIZE) / 2; // 3 = progress bar height
-
-    // full screen artwork position (centered)
-    const fullX = (SCREEN_WIDTH - ARTWORK_SIZE) / 2;
-    const fullY = insets.top + 8 + 56 + 16; // dismiss handle + header + gap
-
-    const x = interpolate(
-      effectiveExpansion.value,
-      [0, 1],
-      [miniX, fullX],
-      Extrapolation.CLAMP
-    );
-
-    // apply scroll offset when expanded so artwork scrolls with content
-    const scrollAdjustment = effectiveExpansion.value * scrollOffset.value;
-
-    const y =
-      interpolate(
-        effectiveExpansion.value,
-        [0, 1],
-        [miniY, fullY],
-        Extrapolation.CLAMP
-      ) - scrollAdjustment;
-
-    const borderRadius = interpolate(
-      effectiveExpansion.value,
-      [0, 1],
-      [Radii.sm, 12],
-      Extrapolation.CLAMP
-    );
-
-    return {
-      position: "absolute",
-      width: size,
-      height: size,
-      left: x,
-      top: y,
-      borderRadius,
-      zIndex: 10,
-      overflow: "hidden",
-    };
-  });
 
   // scale image content to maintain high resolution
   // we render the image at full ARTWORK_SIZE and scale it down
@@ -614,16 +640,20 @@ export function ExpandablePlayer({
 
   // pan gesture for swipe to dismiss - only triggers when at the top of scroll
   const panGesture = Gesture.Pan()
+    .onStart(() => {
+      // Reset drag when starting a new gesture
+      dragOffset.value = 0;
+    })
     .onUpdate((event) => {
       // only allow dragging down if we're at the top of the scroll content
-      if (event.translationY > 0 && scrollOffset.value <= 0) {
+      if (event.translationY > 0 && scrollOffset.value <= 5) {
         dragOffset.value = event.translationY;
       }
     })
     .onEnd((event) => {
       // only dismiss if we were actually dragging (scrollOffset was at top)
       if (
-        scrollOffset.value <= 0 &&
+        scrollOffset.value <= 5 &&
         (dragOffset.value > DISMISS_THRESHOLD ||
           event.velocityY > DISMISS_VELOCITY)
       ) {
@@ -635,18 +665,8 @@ export function ExpandablePlayer({
       }
     })
     .enabled(isExpanded)
-    .activeOffsetY([10, 10])
-    .failOffsetX([-20, 20]);
-
-  // pan gesture for artwork scrolling when expanded - not needed since we use pointerEvents
-  // tap gesture for artwork (only expands when in mini player mode)
-  const artworkTapGesture = Gesture.Tap()
-    .onEnd(() => {
-      if (!isExpanded) {
-        runOnJS(useNowPlayingTransitionStore.getState().expand)();
-      }
-    })
-    .enabled(!isExpanded);
+    .activeOffsetY(15) // only activate after 15px of downward movement
+    .failOffsetY(-10); // fail immediately if scrolling up
 
   // artwork push animation for track changes
   const [previousArtworkUrl, setPreviousArtworkUrl] = useState<string | null>(
@@ -830,7 +850,7 @@ export function ExpandablePlayer({
   );
 
   function toggleQueueView() {
-    const animConfig = { duration: 250, easing: Easing.out(Easing.cubic) };
+    const animConfig = { duration: 400, easing: Easing.inOut(Easing.cubic) };
     setIsQueueTransitioning(true);
 
     if (showQueue) {
@@ -889,7 +909,7 @@ export function ExpandablePlayer({
     .activeOffsetX([-5, 5])
     .failOffsetY([-20, 20]);
 
-  if (!currentTrack) {
+  if (!displayTrack) {
     return null;
   }
 
@@ -898,8 +918,8 @@ export function ExpandablePlayer({
   const displayPosition = isSeeking ? seekPosition : position;
 
   const artistNames =
-    currentTrack.artists && currentTrack.artists.length > 0
-      ? currentTrack.artists.map((a) => a.name).join(", ")
+    displayTrack.artists && displayTrack.artists.length > 0
+      ? displayTrack.artists.map((a) => a.name).join(", ")
       : "Unknown Artist";
 
   async function handlePlayPause() {
@@ -973,7 +993,10 @@ export function ExpandablePlayer({
       ? "repeat"
       : "repeat-outline";
 
-  const upcomingQueue = queue.slice(currentIndex);
+  // Split queue into sections
+  const previousQueue = queue.slice(0, currentIndex);
+  const nowPlaying = currentTrack ? [currentTrack] : [];
+  const upNextQueue = queue.slice(currentIndex + 1);
 
   return (
     <GestureDetector gesture={panGesture}>
@@ -999,14 +1022,39 @@ export function ExpandablePlayer({
             />
           </View>
           <View style={styles.miniInner}>
-            {/* spacer for artwork */}
-            <View style={{ width: MINI_ARTWORK_SIZE + 12 }} />
+            {/* mini artwork */}
+            <View style={{ width: MINI_ARTWORK_SIZE + 12, justifyContent: "center" }}>
+              {thumbnailUrl ? (
+                <Image
+                  source={{ uri: thumbnailUrl }}
+                  style={{
+                    width: MINI_ARTWORK_SIZE,
+                    height: MINI_ARTWORK_SIZE,
+                    borderRadius: 8,
+                    backgroundColor: "rgba(255,255,255,0.1)",
+                  }}
+                />
+              ) : (
+                <View
+                  style={{
+                    width: MINI_ARTWORK_SIZE,
+                    height: MINI_ARTWORK_SIZE,
+                    borderRadius: 8,
+                    backgroundColor: "rgba(255,255,255,0.1)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons name="musical-note" size={24} color="#424242" />
+                </View>
+              )}
+            </View>
             <Pressable
               style={styles.miniTrackInfo}
               onPress={() => useNowPlayingTransitionStore.getState().expand()}
             >
               <ThemedText style={styles.miniTrackTitle} numberOfLines={1}>
-                {currentTrack.title}
+                {displayTrack.title}
               </ThemedText>
               <ThemedText style={styles.miniTrackArtist} numberOfLines={1}>
                 {artistNames}
@@ -1017,90 +1065,46 @@ export function ExpandablePlayer({
                 onPress={() => void previous()}
                 style={styles.miniControlButton}
                 hitSlop={8}
+                disabled={isControlsDisabled}
               >
                 <Ionicons
                   name="play-skip-back"
                   size={22}
-                  color={Palette.textPrimary}
+                  color={isControlsDisabled ? Palette.textMuted : Palette.textPrimary}
                 />
               </Pressable>
               <Pressable
                 onPress={() => void handlePlayPause()}
                 style={styles.miniPlayButton}
-                disabled={isLoading}
+                disabled={isControlsDisabled}
               >
-                <Ionicons
-                  name={isLoading ? "sync" : isPlaying ? "pause" : "play"}
-                  size={24}
-                  color={Palette.background}
-                />
+                {isControlsDisabled ? (
+                  <ActivityIndicator size="small" color={Palette.background} />
+                ) : (
+                  <Ionicons
+                    name={isPlaying ? "pause" : "play"}
+                    size={24}
+                    color={Palette.background}
+                  />
+                )}
               </Pressable>
               <Pressable
                 onPress={() => void next()}
                 style={styles.miniControlButton}
                 hitSlop={8}
+                disabled={isControlsDisabled}
               >
                 <Ionicons
                   name="play-skip-forward"
                   size={22}
-                  color={Palette.textPrimary}
+                  color={isControlsDisabled ? Palette.textMuted : Palette.textPrimary}
                 />
               </Pressable>
             </View>
           </View>
         </Animated.View>
 
-        {/* morphing artwork - pointerEvents none when expanded so scrollview gets touches */}
-        <GestureDetector gesture={artworkTapGesture}>
-          <Animated.View
-            style={artworkStyle}
-            pointerEvents={isExpanded ? "none" : "auto"}
-          >
-            {isAnimating && previousArtworkUrl && (
-              <Animated.View
-                style={[styles.artworkLayer, previousArtworkAnimStyle]}
-              >
-                <Animated.Image
-                  source={{ uri: previousArtworkUrl }}
-                  style={[styles.artworkImage, imageScaleStyle]}
-                  resizeMode="cover"
-                />
-              </Animated.View>
-            )}
-            <Animated.View
-              style={[styles.artworkLayer, currentArtworkAnimStyle]}
-            >
-              {thumbnailUrl || pendingUrl ? (
-                <Animated.Image
-                  source={{ uri: (thumbnailUrl || pendingUrl)! }}
-                  style={[styles.artworkImage, imageScaleStyle]}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={styles.artworkPlaceholder}>
-                  <Ionicons
-                    name="musical-note"
-                    size={isExpanded ? 80 : 18}
-                    color="#424242"
-                  />
-                </View>
-              )}
-              {/* hidden preloader for pending image - triggers swap when loaded */}
-              {pendingUrl && thumbnailUrl !== pendingUrl && (
-                <Image
-                  source={{ uri: pendingUrl }}
-                  style={{
-                    position: "absolute",
-                    width: 1,
-                    height: 1,
-                    opacity: 0,
-                  }}
-                  onLoad={handlePendingImageLoad}
-                />
-              )}
-            </Animated.View>
-          </Animated.View>
-        </GestureDetector>
+
 
         {/* full screen content - fades in on expand */}
         <Animated.View
@@ -1146,8 +1150,68 @@ export function ExpandablePlayer({
             onScroll={scrollHandler}
             scrollEventThrottle={16}
           >
-            {/* artwork placeholder space */}
-            <View style={{ height: ARTWORK_SIZE + 32 }} />
+            {/* expanded artwork */}
+            <Animated.View
+              style={{
+                width: ARTWORK_SIZE,
+                height: ARTWORK_SIZE,
+                alignSelf: "center",
+                marginBottom: 32,
+                marginTop: 10,
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+            >
+              {!isExpanded && (
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={() => useNowPlayingTransitionStore.getState().expand()}
+                />
+              )}
+              {isAnimating && previousArtworkUrl && (
+                <Animated.View
+                  style={[styles.artworkLayer, previousArtworkAnimStyle]}
+                >
+                  <Animated.Image
+                    source={{ uri: previousArtworkUrl }}
+                    style={[styles.artworkImage, imageScaleStyle]}
+                    resizeMode="cover"
+                  />
+                </Animated.View>
+              )}
+              <Animated.View
+                style={[styles.artworkLayer, currentArtworkAnimStyle]}
+              >
+                {thumbnailUrl || pendingUrl ? (
+                  <Animated.Image
+                    source={{ uri: (thumbnailUrl || pendingUrl)! }}
+                    style={[styles.artworkImage, imageScaleStyle]}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.artworkPlaceholder}>
+                    <Ionicons
+                      name="musical-note"
+                      size={isExpanded ? 80 : 18}
+                      color="#424242"
+                    />
+                  </View>
+                )}
+                {/* hidden preloader for pending image - triggers swap when loaded */}
+                {pendingUrl && thumbnailUrl !== pendingUrl && (
+                  <Image
+                    source={{ uri: pendingUrl }}
+                    style={{
+                      position: "absolute",
+                      width: 1,
+                      height: 1,
+                      opacity: 0,
+                    }}
+                    onLoad={handlePendingImageLoad}
+                  />
+                )}
+              </Animated.View>
+            </Animated.View>
 
             {/* artwork/queue toggle */}
             <Animated.View style={[{ width: "100%" }, artworkViewStyle]}>
@@ -1157,7 +1221,7 @@ export function ExpandablePlayer({
                   <View style={styles.trackInfo}>
                     <Pressable onPress={goToAlbum}>
                       <ThemedText style={styles.trackTitle} numberOfLines={2}>
-                        {currentTrack.title}
+                        {displayTrack.title}
                       </ThemedText>
                     </Pressable>
                     <Pressable onPress={goToArtist}>
@@ -1219,20 +1283,21 @@ export function ExpandablePlayer({
                       onPress={() => void handlePrevious()}
                       style={styles.controlButton}
                       hitSlop={8}
+                      disabled={isControlsDisabled}
                     >
                       <Ionicons
                         name="play-skip-back"
                         size={32}
-                        color="#ffffff"
+                        color={isControlsDisabled ? "rgba(255,255,255,0.4)" : "#ffffff"}
                       />
                     </Pressable>
                     <Pressable
                       onPress={() => void handlePlayPause()}
                       style={styles.playButton}
-                      disabled={isLoading}
+                      disabled={isControlsDisabled}
                     >
-                      {isLoading ? (
-                        <Ionicons name="sync" size={40} color="#111111" />
+                      {isControlsDisabled ? (
+                        <ActivityIndicator size="large" color="#111111" />
                       ) : isPlaying ? (
                         <Ionicons name="pause" size={40} color="#111111" />
                       ) : (
@@ -1243,11 +1308,12 @@ export function ExpandablePlayer({
                       onPress={() => void handleNext()}
                       style={styles.controlButton}
                       hitSlop={8}
+                      disabled={isControlsDisabled}
                     >
                       <Ionicons
                         name="play-skip-forward"
                         size={32}
-                        color="#ffffff"
+                        color={isControlsDisabled ? "rgba(255,255,255,0.4)" : "#ffffff"}
                       />
                     </Pressable>
                     <Pressable
@@ -1366,31 +1432,77 @@ export function ExpandablePlayer({
             <Animated.View style={[{ width: "100%" }, queueViewStyle]}>
               {(showQueue || isQueueTransitioning) && (
                 <View style={styles.queueContainer}>
-                  <View style={queueStyles.list}>
-                    {upcomingQueue.length > 0 ? (
-                      upcomingQueue.map((item, index) => (
-                        <QueueItem
-                          key={`${item.trackhash}-${currentIndex + index}`}
+                  {/* Now Playing section */}
+                  {nowPlaying.length > 0 && (
+                    <View style={queueStyles.section}>
+                      <ThemedText style={queueStyles.sectionHeader}>
+                        Now Playing
+                      </ThemedText>
+                      {nowPlaying.map((item, index) => (
+                        <AnimatedQueueItem
+                          key={`now-${item.trackhash}`}
                           track={item}
-                          index={currentIndex + index}
-                          isCurrent={index === 0}
-                          onPress={() => {
-                            if (index > 0) void skipTo(currentIndex + index);
-                          }}
-                          onRemove={() => {
-                            if (index > 0)
-                              removeFromQueue(currentIndex + index);
-                          }}
+                          index={currentIndex}
+                          queueIndex={0}
+                          viewTransition={viewTransition}
+                          isCurrent={true}
+                          onPress={() => {}}
+                          onRemove={() => {}}
                         />
-                      ))
-                    ) : (
-                      <View style={queueStyles.empty}>
-                        <ThemedText style={queueStyles.emptyText}>
-                          Queue is empty
-                        </ThemedText>
-                      </View>
-                    )}
-                  </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Up Next section */}
+                  {upNextQueue.length > 0 && (
+                    <View style={queueStyles.section}>
+                      <ThemedText style={queueStyles.sectionHeader}>
+                        Up Next
+                      </ThemedText>
+                      {upNextQueue.map((item, index) => (
+                        <AnimatedQueueItem
+                          key={`next-${item.trackhash}-${index}`}
+                          track={item}
+                          index={currentIndex + 1 + index}
+                          queueIndex={index + 1}
+                          viewTransition={viewTransition}
+                          isCurrent={false}
+                          onPress={() => void skipTo(currentIndex + 1 + index)}
+                          onRemove={() => removeFromQueue(currentIndex + 1 + index)}
+                        />
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Previously Played section */}
+                  {previousQueue.length > 0 && (
+                    <View style={queueStyles.section}>
+                      <ThemedText style={queueStyles.sectionHeader}>
+                        Previously Played
+                      </ThemedText>
+                      {previousQueue.map((item, index) => (
+                        <AnimatedQueueItem
+                          key={`prev-${item.trackhash}-${index}`}
+                          track={item}
+                          index={index}
+                          queueIndex={nowPlaying.length + upNextQueue.length + index + 1}
+                          viewTransition={viewTransition}
+                          isCurrent={false}
+                          onPress={() => void skipTo(index)}
+                          onRemove={() => removeFromQueue(index)}
+                        />
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Empty state */}
+                  {queue.length === 0 && (
+                    <View style={queueStyles.empty}>
+                      <ThemedText style={queueStyles.emptyText}>
+                        Queue is empty
+                      </ThemedText>
+                    </View>
+                  )}
                 </View>
               )}
             </Animated.View>
@@ -1402,6 +1514,19 @@ export function ExpandablePlayer({
 }
 
 const queueStyles = StyleSheet.create({
+  section: {
+    marginBottom: 16,
+  },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.5)",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
   list: { paddingVertical: 8 },
   item: {
     flexDirection: "row",
@@ -1523,6 +1648,7 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: Palette.surface,
     overflow: "hidden",
+    zIndex: 10,
   },
   backgroundWrapper: {
     ...StyleSheet.absoluteFillObject,
@@ -1605,6 +1731,7 @@ const styles = StyleSheet.create({
   fullContent: {
     ...StyleSheet.absoluteFillObject,
     paddingHorizontal: 24,
+    zIndex: 20,
   },
   dismissHandle: {
     width: 36,
@@ -1613,6 +1740,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.4)",
     alignSelf: "center",
     marginBottom: 8,
+    zIndex: 20,
   },
   header: {
     flexDirection: "row",
@@ -1620,6 +1748,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 16,
     height: 40,
+    zIndex: 20,
   },
   backButton: {
     width: 40,
@@ -1646,7 +1775,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 32,
+    paddingBottom: 64,
   },
   trackInfo: {
     alignItems: "center",

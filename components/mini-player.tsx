@@ -1,7 +1,7 @@
 // note: this component is deprecated in favor of ExpandablePlayer
 // kept for potential backward compatibility or reference
 
-import { Image, Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ThemedText } from "@/components/themed-text";
@@ -15,7 +15,11 @@ export function MiniPlayer() {
   const { position, duration, isPlaying } = usePlaybackProgress();
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const pendingTrack = usePlayerStore((s) => s.pendingTrack);
+  const displayTrack = pendingTrack || currentTrack;
   const isLoading = usePlayerStore((s) => s.isLoading);
+  const pendingTrackHash = usePlayerStore((s) => s.pendingTrackHash);
+  const isControlsDisabled = isLoading || !!pendingTrackHash;
   const play = usePlayerStore((s) => s.play);
   const pause = usePlayerStore((s) => s.pause);
   const next = usePlayerStore((s) => s.next);
@@ -23,18 +27,18 @@ export function MiniPlayer() {
 
   const expand = useNowPlayingTransitionStore((s) => s.expand);
 
-  if (!currentTrack) {
+  if (!displayTrack) {
     return null;
   }
 
   const progress = duration > 0 ? position / duration : 0;
-  const thumbnailUrl = currentTrack.image
-    ? getThumbnailUrl(currentTrack.image, "small")
+  const thumbnailUrl = displayTrack.image
+    ? getThumbnailUrl(displayTrack.image, "small")
     : null;
 
   const artistNames =
-    currentTrack.artists && currentTrack.artists.length > 0
-      ? currentTrack.artists.map((a) => a.name).join(", ")
+    displayTrack.artists && displayTrack.artists.length > 0
+      ? displayTrack.artists.map((a) => a.name).join(", ")
       : "Unknown Artist";
 
   async function handlePlayPause() {
@@ -77,7 +81,7 @@ export function MiniPlayer() {
         {/* track info */}
         <Pressable style={styles.trackInfo} onPress={expand}>
           <ThemedText style={styles.trackTitle} numberOfLines={1}>
-            {currentTrack.title}
+            {displayTrack.title}
           </ThemedText>
           <ThemedText style={styles.trackArtist} numberOfLines={1}>
             {artistNames}
@@ -90,35 +94,41 @@ export function MiniPlayer() {
             onPress={() => void previous()}
             style={styles.controlButton}
             hitSlop={8}
+            disabled={isControlsDisabled}
           >
             <Ionicons
               name="play-skip-back"
               size={22}
-              color={Palette.textPrimary}
+              color={isControlsDisabled ? Palette.textMuted : Palette.textPrimary}
             />
           </Pressable>
 
           <Pressable
             onPress={() => void handlePlayPause()}
             style={styles.playButton}
-            disabled={isLoading}
+            disabled={isControlsDisabled}
           >
-            <Ionicons
-              name={isLoading ? "sync" : isPlaying ? "pause" : "play"}
-              size={24}
-              color={Palette.background}
-            />
+            {isControlsDisabled ? (
+              <ActivityIndicator size="small" color={Palette.background} />
+            ) : (
+              <Ionicons
+                name={isPlaying ? "pause" : "play"}
+                size={24}
+                color={Palette.background}
+              />
+            )}
           </Pressable>
 
           <Pressable
             onPress={() => void next()}
             style={styles.controlButton}
             hitSlop={8}
+            disabled={isControlsDisabled}
           >
             <Ionicons
               name="play-skip-forward"
               size={22}
-              color={Palette.textPrimary}
+              color={isControlsDisabled ? Palette.textMuted : Palette.textPrimary}
             />
           </Pressable>
         </View>

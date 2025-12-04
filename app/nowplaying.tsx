@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   Image,
   ImageBackground,
@@ -978,7 +979,7 @@ export default function NowPlayingScreen() {
                       disabled={isLoading}
                     >
                       {isLoading ? (
-                        <Ionicons name="sync" size={40} color="#111111" />
+                        <ActivityIndicator size="large" color="#111111" />
                       ) : isPlaying ? (
                         <Ionicons name="pause" size={40} color="#111111" />
                       ) : (
@@ -1199,7 +1200,7 @@ export default function NowPlayingScreen() {
                     disabled={isLoading}
                   >
                     {isLoading ? (
-                      <Ionicons name="sync" size={40} color="#111111" />
+                      <ActivityIndicator size="large" color="#111111" />
                     ) : isPlaying ? (
                       <Ionicons name="pause" size={40} color="#111111" />
                     ) : (

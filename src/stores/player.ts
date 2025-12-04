@@ -77,6 +77,11 @@ type PlayerState = {
   shuffleMode: boolean;
   repeatMode: RepeatMode;
   isLoading: boolean;
+  // track hash of the track that is currently being loaded (set immediately on click)
+  // this allows the UI to show loading state before the async loadTrack function runs
+  pendingTrackHash: string | null;
+  // full track object being loaded - allows player UI to show metadata immediately
+  pendingTrack: Track | null;
   error: string | null;
   showQueue: boolean;
   playbackSource: string;
@@ -228,6 +233,8 @@ export const usePlayerStore = create<PlayerState>()(
       shuffleMode: false,
       repeatMode: "off",
       isLoading: false,
+      pendingTrackHash: null,
+      pendingTrack: null,
       error: null,
       showQueue: false,
       playbackSource: "queue",
@@ -282,7 +289,7 @@ export const usePlayerStore = create<PlayerState>()(
       },
       loadTrack: async (track) => {
         await configureAudio();
-        set({ isLoading: true, error: null });
+        set({ isLoading: true, pendingTrackHash: track.trackhash, pendingTrack: track, error: null });
         try {
           // stop and remove existing player if any
           if (player) {
@@ -398,7 +405,7 @@ export const usePlayerStore = create<PlayerState>()(
           set({ error: message });
           throw e;
         } finally {
-          set({ isLoading: false });
+          set({ isLoading: false, pendingTrackHash: null, pendingTrack: null });
         }
       },
       playTrack: async (track) => {
@@ -455,7 +462,10 @@ export const usePlayerStore = create<PlayerState>()(
           Image.prefetch(cacheBustedUrl).catch(() => {});
         }
 
-        await get().playTrack(queue[index]);
+        // set pending track immediately so UI can show metadata right away
+        const trackToPlay = queue[index];
+        set({ pendingTrackHash: trackToPlay.trackhash, pendingTrack: trackToPlay });
+        await get().playTrack(trackToPlay);
       },
       addToQueue: (track) => {
         const state = get();

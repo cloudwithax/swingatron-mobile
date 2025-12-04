@@ -78,8 +78,6 @@ export default function TabLayout() {
             ),
           }}
         />
-        {/* hidden screens */}
-        <Tabs.Screen name="explore" options={{ href: null }} />
       </Tabs>
 
       {/* expandable player that morphs from mini to full screen */}

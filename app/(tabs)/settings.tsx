@@ -102,11 +102,11 @@ export default function SettingsScreen() {
     try {
       // Keys to preserve (auth state and server config)
       const preserveKeys = ["swing_user", "swing_base_url"];
-      
+
       // Get all keys and filter out the ones to preserve
       const allKeys = await AsyncStorage.getAllKeys();
       const keysToRemove = allKeys.filter((key) => !preserveKeys.includes(key));
-      
+
       if (keysToRemove.length > 0) {
         await AsyncStorage.multiRemove(keysToRemove);
       }
@@ -204,6 +204,30 @@ export default function SettingsScreen() {
                 <Text style={styles.buttonLabelOutline}>Clear Cache</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>About</ThemedText>
+          <View style={styles.sectionContent}>
+            
+            <ThemedText style={styles.sectionValue}>Swingatron v1.0.0</ThemedText>
+            <ThemedText style={styles.sectionDescription}>
+              {`Built by clxud with <3`}
+            </ThemedText>
+            <Pressable
+              onPress={() =>
+                WebBrowser.openBrowserAsync(
+                  "https://github.com/cloudwithax/swingatron-mobile"
+                )
+              }
+            >
+              <Text
+                style={styles.sectionDescription}
+              >
+                Source Code
+              </Text>
+            </Pressable>
           </View>
         </View>
 

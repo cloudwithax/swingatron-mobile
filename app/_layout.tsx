@@ -131,10 +131,11 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: "#151515",
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: Palette.background,
+    backgroundColor: "#151515",
     justifyContent: "center",
     alignItems: "center",
   },

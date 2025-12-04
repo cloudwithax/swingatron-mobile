@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import {
+  ActivityIndicator,
   Image,
   ImageBackground,
   Pressable,
@@ -139,26 +140,7 @@ function AnimatedEqualizer({
   );
 }
 
-// renders the playing state indicator overlay on album art
-function PlayingIndicatorOverlay({
-  isCurrentTrack,
-  isLoading,
-  isPlaying,
-}: {
-  isCurrentTrack: boolean;
-  isLoading: boolean;
-  isPlaying: boolean;
-}) {
-  if (!isCurrentTrack) return null;
 
-  if (isLoading) {
-    return <Ionicons name="sync" size={18} color="#ffffff" />;
-  }
-  if (isPlaying) {
-    return <AnimatedEqualizer color="#ffffff" isOverlay />;
-  }
-  return <Ionicons name="pause" size={18} color="#ffffff" />;
-}
 
 export function TrackItem({
   track,
@@ -170,8 +152,24 @@ export function TrackItem({
   onFavorite,
 }: TrackItemProps) {
   const { isPlaying } = usePlaybackProgress();
-  const { currentTrack, isLoading } = usePlayerStore();
+  const { currentTrack, pendingTrackHash } = usePlayerStore();
+  
   const isCurrentTrack = currentTrack?.trackhash === track.trackhash;
+  const isPendingTrack = pendingTrackHash === track.trackhash;
+  
+  // this track is "active" (highlighted) only if:
+  // - it's the pending track (takes priority), OR
+  // - it's the current track AND there's no pending track
+  const isActive = isPendingTrack || (isCurrentTrack && !pendingTrackHash);
+  
+  // this track shows loading indicator if it's the pending track
+  const isTrackLoading = isPendingTrack;
+  
+  // show playing/pause indicator only if:
+  // - this IS the current track AND
+  // - there is NO pending track (otherwise we're switching away from this track)
+  const showPlayingIndicator = isCurrentTrack && !pendingTrackHash;
+  
   const thumbnailUrl = track.image
     ? getThumbnailUrl(track.image, "small")
     : null;
@@ -194,9 +192,37 @@ export function TrackItem({
     onFavorite?.(track);
   }
 
+  // determine what indicator to show on the artwork overlay
+  function renderIndicator() {
+    if (isTrackLoading) {
+      return <ActivityIndicator size="small" color="#ffffff" />;
+    }
+    if (showPlayingIndicator) {
+      if (isPlaying) {
+        return <AnimatedEqualizer color="#ffffff" isOverlay />;
+      }
+      return <Ionicons name="pause" size={18} color="#ffffff" />;
+    }
+    return null;
+  }
+
+  // determine what to show in the leading container (no thumbnail case)
+  function renderLeadingIndicator() {
+    if (isTrackLoading) {
+      return <ActivityIndicator size="small" color={Palette.textPrimary} />;
+    }
+    if (showPlayingIndicator) {
+      if (isPlaying) {
+        return <AnimatedEqualizer color={Palette.primary} />;
+      }
+      return <Ionicons name="pause" size={16} color={Palette.textPrimary} />;
+    }
+    return null;
+  }
+
   return (
     <Pressable
-      style={[styles.container, isCurrentTrack && styles.containerActive]}
+      style={[styles.container, isActive && styles.containerActive]}
       onPress={handlePress}
       onLongPress={handleMenuPress}
     >
@@ -208,28 +234,18 @@ export function TrackItem({
             <Ionicons name="musical-note" size={18} color={Palette.textMuted} />
           </View>
         ) : thumbnailUrl ? (
-          // show album art with playing indicator overlay when current track
+          // show album art with indicator overlay when active
           <ImageBackground
             source={{ uri: thumbnailUrl }}
             style={styles.artworkWithOverlay}
             imageStyle={styles.artworkImage}
           >
-            {isCurrentTrack && <View style={styles.artworkDarkOverlay} />}
-            <PlayingIndicatorOverlay
-              isCurrentTrack={isCurrentTrack}
-              isLoading={isLoading}
-              isPlaying={isPlaying}
-            />
+            {(isTrackLoading || showPlayingIndicator) && <View style={styles.artworkDarkOverlay} />}
+            {renderIndicator()}
           </ImageBackground>
-        ) : isCurrentTrack ? (
+        ) : isTrackLoading || showPlayingIndicator ? (
           <View style={styles.playingIndicator}>
-            {isLoading ? (
-              <Ionicons name="sync" size={16} color={Palette.textPrimary} />
-            ) : isPlaying ? (
-              <AnimatedEqualizer color={Palette.primary} />
-            ) : (
-              <Ionicons name="pause" size={16} color={Palette.textPrimary} />
-            )}
+            {renderLeadingIndicator()}
           </View>
         ) : index !== undefined ? (
           <ThemedText style={styles.indexText}>{index + 1}</ThemedText>
@@ -240,7 +256,7 @@ export function TrackItem({
 
       <View style={styles.infoContainer}>
         <ThemedText
-          style={[styles.title, isCurrentTrack && styles.titleActive]}
+          style={[styles.title, isActive && styles.titleActive]}
           numberOfLines={1}
         >
           {track.title}

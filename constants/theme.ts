@@ -18,7 +18,7 @@ export const Colors = {
   },
   dark: {
     text: "#f5f5f5",
-    background: "#111111",
+    background: "#151515",
     tint: tintColorDark,
     icon: "#9e9e9e",
     tabIconDefault: "#666666",
@@ -51,7 +51,7 @@ export const Fonts = Platform.select({
 // palette matching desktop main.css dark theme variables
 export const Palette = {
   // core backgrounds
-  background: "#111111",
+  background: "#151515",
   surface: "#181818",
   surfaceVariant: "#212121",
   card: "#181818",
@@ -117,7 +117,7 @@ export const Shadows = {
 
 // gradients simplified to match desktop solid backgrounds
 export const Gradients = {
-  screen: ["#111111", "#111111", "#111111"] as const,
+  screen: ["#151515", "#151515", "#151515"] as const,
   card: ["#181818", "#181818"] as const,
   highlight: ["#f5f5f5", "#e0e0e0"] as const,
 };
