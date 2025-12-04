@@ -11,9 +11,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cloudwithax.swingatron",
+      "icon": "./assets/images/icon.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -24,7 +27,14 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.cloudwithax.swingatron"
     },
     "web": {
       "output": "static",
@@ -45,7 +55,7 @@
         }
       ],
       "expo-secure-store",
-      "expo-av"
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,

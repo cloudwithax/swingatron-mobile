@@ -3,7 +3,12 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { Audio, type AVPlaybackStatus } from "expo-av";
 import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { Track, RepeatMode } from "../api/types";
+import { setAudioModeAsync } from "expo-audio";
+import { VideoPlayer } from "expo-video";
+import { Image } from "react-native";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { getBaseUrl, getThumbnailUrl, getTrackStreamUrl } from "../api/client";
 import { logTrackPlayback } from "../api/playback";
 import { getTrackStreamUrl, getThumbnailUrl } from "../api/client";
 
@@ -220,6 +225,12 @@ export const usePlayerStore = create<PlayerState>()(
           pendingTrack: track,
           error: null,
         });
+        set({
+          isLoading: true,
+          pendingTrackHash: track.trackhash,
+          pendingTrack: track,
+          error: null,
+        });
         try {
           // stop and remove existing sound if any
           if (sound) {
@@ -263,7 +274,7 @@ export const usePlayerStore = create<PlayerState>()(
                 void get().next();
               }
             }
-          );
+          }, 250);
 
           sound = newSound;
 
@@ -276,7 +287,6 @@ export const usePlayerStore = create<PlayerState>()(
           const imageToUse = existingAlbumImage || track.image;
 
           // check if the album image changed - if not, reuse existing cache buster
-          // this prevents unnecessary cache busting when skipping tracks in same album
           const existingCacheBuster = get().imageCacheBuster;
           const imageChanged = existingAlbumImage !== imageToUse;
           const cacheBusterToUse = imageChanged
@@ -364,6 +374,10 @@ export const usePlayerStore = create<PlayerState>()(
 
         // set pending track immediately so UI can show metadata right away
         const trackToPlay = queue[index];
+        set({
+          pendingTrackHash: trackToPlay.trackhash,
+          pendingTrack: trackToPlay,
+        });
         set({
           pendingTrackHash: trackToPlay.trackhash,
           pendingTrack: trackToPlay,
