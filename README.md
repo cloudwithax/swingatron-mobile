@@ -19,7 +19,7 @@ Swingatron is a modern mobile music and audio application built with React Nativ
 - **Routing**: [Expo Router](https://docs.expo.dev/router/introduction/)
 - **State Management**: [Zustand](https://github.com/pmndrs/zustand)
 - **Networking**: Axios
-- **Audio**: expo-av
+- **Audio**: react-native-track-player (lock screen controls, notification player)
 - **Storage**: expo-secure-store, @react-native-async-storage/async-storage
 - **Animations**: react-native-reanimated
 - **Styling**: expo-linear-gradient, expo-blur, expo-font

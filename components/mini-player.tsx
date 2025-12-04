@@ -17,7 +17,7 @@ import { usePlaybackProgress } from "@/hooks/use-playback-progress";
 import { getThumbnailUrl } from "@/src/api/client";
 
 export function MiniPlayer() {
-  // get real-time playback progress directly from expo-av
+  // get real-time playback progress from react-native-track-player
   const { position, duration, isPlaying } = usePlaybackProgress();
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);

@@ -1,41 +1,15 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { Audio, type AVPlaybackStatus } from "expo-av";
+import TrackPlayer, {
+  State,
+  type Track as RNTPTrack,
+} from "react-native-track-player";
 import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Track, RepeatMode } from "../api/types";
 import { logTrackPlayback } from "../api/playback";
 import { getTrackStreamUrl, getThumbnailUrl } from "../api/client";
-
-// playback status subscriber type for external hooks
-export type PlaybackSubscriber = () => void;
-
-const playbackSubscribers = new Set<PlaybackSubscriber>();
-
-// cache the last known status to provide immediate state to new subscribers
-let lastKnownStatus: AVPlaybackStatus | null = null;
-
-// get current playback snapshot for useSyncExternalStore
-export function getPlaybackSnapshot(): AVPlaybackStatus | null {
-  return lastKnownStatus;
-}
-
-// subscribe to playback status updates
-// compatible with useSyncExternalStore - takes a callback with no args
-export function subscribeToPlayback(
-  onStoreChange: PlaybackSubscriber
-): () => void {
-  playbackSubscribers.add(onStoreChange);
-  return () => {
-    playbackSubscribers.delete(onStoreChange);
-  };
-}
-
-function notifySubscribers(status: AVPlaybackStatus): void {
-  lastKnownStatus = status;
-  // notify all subscribers that state changed - they will read from snapshot
-  playbackSubscribers.forEach((callback) => callback());
-}
+import { setupPlayer, mapRepeatMode } from "../services";
 
 type PlayerState = {
   currentTrack: Track | null;
@@ -89,8 +63,7 @@ type PlayerState = {
   closeQueue: () => void;
 };
 
-let sound: Audio.Sound | null = null;
-let audioConfigured = false;
+let playerSetup = false;
 
 const MIN_PLAY_DURATION_TO_LOG = 30;
 
@@ -103,15 +76,11 @@ type PlaybackSession = {
 
 let currentSession: PlaybackSession | null = null;
 
-async function configureAudio(): Promise<void> {
-  if (!audioConfigured) {
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      shouldDuckAndroid: true,
-    });
-    audioConfigured = true;
+async function ensurePlayerSetup(): Promise<boolean> {
+  if (!playerSetup) {
+    playerSetup = await setupPlayer();
   }
+  return playerSetup;
 }
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -148,6 +117,24 @@ async function maybeScrobble(
   }
 }
 
+// convert our track type to react-native-track-player track format
+function toRNTPTrack(track: Track, albumImage: string | null): RNTPTrack {
+  const artistNames =
+    track.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
+  const imageToUse = albumImage || track.image;
+  const artwork = imageToUse ? getThumbnailUrl(imageToUse, "large") : undefined;
+
+  return {
+    id: track.trackhash,
+    url: getTrackStreamUrl(track.trackhash, track.filepath),
+    title: track.title,
+    artist: artistNames,
+    album: track.album || undefined,
+    artwork,
+    duration: track.duration || undefined,
+  };
+}
+
 export const usePlayerStore = create<PlayerState>()(
   persist(
     (set, get) => ({
@@ -167,53 +154,52 @@ export const usePlayerStore = create<PlayerState>()(
       playbackSource: "queue",
       albumImage: null,
       imageCacheBuster: Date.now(),
+
       play: async () => {
-        if (!sound) return;
-        const status = await sound.playAsync();
-        notifySubscribers(status);
+        await ensurePlayerSetup();
+        await TrackPlayer.play();
       },
+
       pause: async () => {
-        if (!sound) return;
-        const status = await sound.pauseAsync();
-        notifySubscribers(status);
+        await TrackPlayer.pause();
       },
+
       playPause: async () => {
-        if (!sound) return;
-        const status = await sound.getStatusAsync();
-        if (status.isLoaded && status.isPlaying) {
-          await get().pause();
+        await ensurePlayerSetup();
+        const state = await TrackPlayer.getPlaybackState();
+        if (state.state === State.Playing) {
+          await TrackPlayer.pause();
         } else {
-          await get().play();
+          await TrackPlayer.play();
         }
       },
+
       seekTo: async (position) => {
-        if (!sound) return;
-        // expo-av uses milliseconds for seek position
-        const status = await sound.setPositionAsync(position);
-        notifySubscribers(status);
+        // position is in milliseconds, track player uses seconds
+        await TrackPlayer.seekTo(position / 1000);
         if (currentSession) {
           currentSession.lastPosition = position;
           currentSession.accumulated = 0;
           currentSession.hasScrobbled = false;
         }
       },
+
       setVolume: (volume) => {
         const clamped = Math.max(0, Math.min(1, volume));
-        if (sound) {
-          sound.setVolumeAsync(clamped);
-        }
+        TrackPlayer.setVolume(clamped);
         set({ volume: clamped, isMuted: clamped === 0 });
       },
+
       toggleMute: () => {
         const state = get();
         const nextMuted = !state.isMuted;
-        if (sound) {
-          sound.setIsMutedAsync(nextMuted);
-        }
+        // track player doesn't have a mute function, so we set volume to 0
+        TrackPlayer.setVolume(nextMuted ? 0 : state.volume);
         set({ isMuted: nextMuted });
       },
+
       loadTrack: async (track) => {
-        await configureAudio();
+        await ensurePlayerSetup();
         set({
           isLoading: true,
           pendingTrackHash: track.trackhash,
@@ -221,67 +207,27 @@ export const usePlayerStore = create<PlayerState>()(
           error: null,
         });
         try {
-          // stop and remove existing sound if any
-          if (sound) {
-            await sound.stopAsync();
-            await sound.unloadAsync();
-            sound = null;
-          }
-
-          const uri = getTrackStreamUrl(track.trackhash, track.filepath);
-
-          // create new sound with expo-av
-          const { sound: newSound, status } = await Audio.Sound.createAsync(
-            { uri },
-            {
-              shouldPlay: false,
-              volume: get().volume,
-              isMuted: get().isMuted,
-              progressUpdateIntervalMillis: 250,
-            },
-            (status: AVPlaybackStatus) => {
-              // notify external hooks for real-time progress updates
-              notifySubscribers(status);
-
-              // handle scrobbling - expo-av uses milliseconds directly
-              if (status.isLoaded && currentSession && get().currentTrack) {
-                const positionMillis = status.positionMillis;
-                const delta = positionMillis - currentSession.lastPosition;
-                if (status.isPlaying && delta > 0) {
-                  currentSession.accumulated += delta;
-                  currentSession.lastPosition = positionMillis;
-                  void maybeScrobble(get().currentTrack, get().playbackSource);
-                }
-              }
-
-              // auto-advance to next track when playback ends
-              if (
-                status.isLoaded &&
-                status.didJustFinish &&
-                !status.isLooping
-              ) {
-                void get().next();
-              }
-            }
-          );
-
-          sound = newSound;
-
-          // notify subscribers with initial status
-          notifySubscribers(status);
-
           // update current track but preserve album image from setQueue context
-          // only fall back to track.image if albumImage was never set
           const existingAlbumImage = get().albumImage;
           const imageToUse = existingAlbumImage || track.image;
 
           // check if the album image changed - if not, reuse existing cache buster
-          // this prevents unnecessary cache busting when skipping tracks in same album
           const existingCacheBuster = get().imageCacheBuster;
           const imageChanged = existingAlbumImage !== imageToUse;
           const cacheBusterToUse = imageChanged
             ? Date.now()
             : existingCacheBuster;
+
+          // reset the queue and add the single track
+          await TrackPlayer.reset();
+          const rntpTrack = toRNTPTrack(track, imageToUse);
+          await TrackPlayer.add(rntpTrack);
+
+          // set volume
+          await TrackPlayer.setVolume(get().isMuted ? 0 : get().volume);
+
+          // set repeat mode
+          await TrackPlayer.setRepeatMode(mapRepeatMode(get().repeatMode));
 
           set({
             currentTrack: track,
@@ -289,7 +235,7 @@ export const usePlayerStore = create<PlayerState>()(
             imageCacheBuster: cacheBusterToUse,
           });
 
-          // only prefetch if image actually changed
+          // prefetch image if changed
           if (imageToUse && imageChanged) {
             const baseUrl = getThumbnailUrl(imageToUse, "large");
             const cacheBustedUrl = `${baseUrl}${
@@ -308,10 +254,12 @@ export const usePlayerStore = create<PlayerState>()(
           set({ isLoading: false, pendingTrackHash: null, pendingTrack: null });
         }
       },
+
       playTrack: async (track) => {
         await get().loadTrack(track);
         await get().play();
       },
+
       setQueue: async (
         tracks,
         startIndex = 0,
@@ -320,9 +268,12 @@ export const usePlayerStore = create<PlayerState>()(
         albumImage
       ) => {
         if (tracks.length === 0) return;
+        await ensurePlayerSetup();
+
         const state = get();
         let queue = tracks;
         let index = startIndex;
+
         if (state.shuffleMode && preserveShuffle) {
           const shuffled = shuffleArray(tracks);
           const startTrack = tracks[startIndex];
@@ -340,8 +291,7 @@ export const usePlayerStore = create<PlayerState>()(
           index = 0;
         }
 
-        // generate new cache buster NOW before playTrack runs
-        // this prevents component from reading stale cache buster from persistence
+        // generate new cache buster before playTrack runs
         const newCacheBuster = Date.now();
 
         set({
@@ -353,7 +303,7 @@ export const usePlayerStore = create<PlayerState>()(
           imageCacheBuster: newCacheBuster,
         });
 
-        // prefetch album artwork immediately with the cache buster we just set
+        // prefetch album artwork immediately
         if (albumImage) {
           const baseUrl = getThumbnailUrl(albumImage, "large");
           const cacheBustedUrl = `${baseUrl}${
@@ -370,6 +320,7 @@ export const usePlayerStore = create<PlayerState>()(
         });
         await get().playTrack(trackToPlay);
       },
+
       addToQueue: (track) => {
         const state = get();
         set({
@@ -377,6 +328,7 @@ export const usePlayerStore = create<PlayerState>()(
           originalQueue: [...state.originalQueue, track],
         });
       },
+
       playNext: (track) => {
         const state = get();
         const queue = [...state.queue];
@@ -385,6 +337,7 @@ export const usePlayerStore = create<PlayerState>()(
         originalQueue.splice(state.currentIndex + 1, 0, track);
         set({ queue, originalQueue });
       },
+
       removeFromQueue: (index) => {
         const state = get();
         if (index < 0 || index >= state.queue.length) return;
@@ -400,6 +353,7 @@ export const usePlayerStore = create<PlayerState>()(
         }
         set({ queue, originalQueue, currentIndex });
       },
+
       moveQueueItem: (from, to) => {
         const state = get();
         const length = state.queue.length;
@@ -425,13 +379,18 @@ export const usePlayerStore = create<PlayerState>()(
 
         set({ queue, originalQueue, currentIndex });
       },
+
       next: async () => {
         const state = get();
         if (state.queue.length === 0) return;
         const lastIndex = state.queue.length - 1;
         let nextIndex = state.currentIndex;
+
         if (state.repeatMode === "one") {
-          nextIndex = state.currentIndex;
+          // restart current track
+          await TrackPlayer.seekTo(0);
+          await TrackPlayer.play();
+          return;
         } else if (state.currentIndex < lastIndex) {
           nextIndex = state.currentIndex + 1;
         } else if (state.repeatMode === "all") {
@@ -440,45 +399,45 @@ export const usePlayerStore = create<PlayerState>()(
           await get().pause();
           return;
         }
+
         set({ currentIndex: nextIndex });
         await get().playTrack(get().queue[nextIndex]);
       },
+
       previous: async () => {
         const state = get();
         if (state.queue.length === 0) return;
 
-        // get current position from sound to decide whether to restart or go back
-        // expo-av uses milliseconds
-        let currentPosition = 0;
-        if (sound) {
-          const status = await sound.getStatusAsync();
-          if (status.isLoaded) {
-            currentPosition = status.positionMillis;
-          }
-        }
+        // get current position to decide whether to restart or go back
+        const position = await TrackPlayer.getProgress();
+        const currentPositionMs = position.position * 1000;
 
-        if (currentPosition > 3000) {
-          await get().seekTo(0);
+        if (currentPositionMs > 3000) {
+          await TrackPlayer.seekTo(0);
           return;
         }
+
         let prevIndex = state.currentIndex;
         if (state.currentIndex > 0) {
           prevIndex = state.currentIndex - 1;
         } else if (state.repeatMode === "all") {
           prevIndex = state.queue.length - 1;
         } else {
-          await get().seekTo(0);
+          await TrackPlayer.seekTo(0);
           return;
         }
+
         set({ currentIndex: prevIndex });
         await get().playTrack(get().queue[prevIndex]);
       },
+
       skipTo: async (index) => {
         const state = get();
         if (index < 0 || index >= state.queue.length) return;
         set({ currentIndex: index });
         await get().playTrack(state.queue[index]);
       },
+
       toggleShuffle: () => {
         const state = get();
         const nextShuffle = !state.shuffleMode;
@@ -513,21 +472,19 @@ export const usePlayerStore = create<PlayerState>()(
           currentIndex: 0,
         });
       },
-      cycleRepeatMode: () => {
+
+      cycleRepeatMode: async () => {
         const state = get();
         const modes: RepeatMode[] = ["off", "all", "one"];
         const index = modes.indexOf(state.repeatMode);
         const next = modes[(index + 1) % modes.length];
+        await TrackPlayer.setRepeatMode(mapRepeatMode(next));
         set({ repeatMode: next });
       },
+
       clearQueue: async () => {
-        if (sound) {
-          await sound.stopAsync();
-          await sound.unloadAsync();
-          sound = null;
-        }
+        await TrackPlayer.reset();
         currentSession = null;
-        lastKnownStatus = null;
         set({
           currentTrack: null,
           queue: [],
@@ -535,9 +492,11 @@ export const usePlayerStore = create<PlayerState>()(
           currentIndex: 0,
         });
       },
+
       openQueue: () => {
         set({ showQueue: true });
       },
+
       closeQueue: () => {
         set({ showQueue: false });
       },

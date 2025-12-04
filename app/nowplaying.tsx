@@ -227,7 +227,7 @@ export default function NowPlayingScreen() {
     transform: [{ translateY: (1 - viewTransition.value) * 15 }],
   }));
 
-  // get real-time playback progress directly from expo-av
+  // get real-time playback progress from react-native-track-player
   const { position, duration, isPlaying } = usePlaybackProgress();
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);

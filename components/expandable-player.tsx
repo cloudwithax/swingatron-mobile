@@ -1150,73 +1150,72 @@ export function ExpandablePlayer({
             onScroll={scrollHandler}
             scrollEventThrottle={16}
           >
-            {/* expanded artwork */}
-            <Animated.View
-              style={{
-                width: ARTWORK_SIZE,
-                height: ARTWORK_SIZE,
-                alignSelf: "center",
-                marginBottom: 32,
-                marginTop: 10,
-                borderRadius: 12,
-                overflow: "hidden",
-              }}
-            >
-              {!isExpanded && (
-                <Pressable
-                  style={StyleSheet.absoluteFill}
-                  onPress={() => useNowPlayingTransitionStore.getState().expand()}
-                />
-              )}
-              {isAnimating && previousArtworkUrl && (
-                <Animated.View
-                  style={[styles.artworkLayer, previousArtworkAnimStyle]}
-                >
-                  <Animated.Image
-                    source={{ uri: previousArtworkUrl }}
-                    style={[styles.artworkImage, imageScaleStyle]}
-                    resizeMode="cover"
-                  />
-                </Animated.View>
-              )}
-              <Animated.View
-                style={[styles.artworkLayer, currentArtworkAnimStyle]}
-              >
-                {thumbnailUrl || pendingUrl ? (
-                  <Animated.Image
-                    source={{ uri: (thumbnailUrl || pendingUrl)! }}
-                    style={[styles.artworkImage, imageScaleStyle]}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.artworkPlaceholder}>
-                    <Ionicons
-                      name="musical-note"
-                      size={isExpanded ? 80 : 18}
-                      color="#424242"
-                    />
-                  </View>
-                )}
-                {/* hidden preloader for pending image - triggers swap when loaded */}
-                {pendingUrl && thumbnailUrl !== pendingUrl && (
-                  <Image
-                    source={{ uri: pendingUrl }}
-                    style={{
-                      position: "absolute",
-                      width: 1,
-                      height: 1,
-                      opacity: 0,
-                    }}
-                    onLoad={handlePendingImageLoad}
-                  />
-                )}
-              </Animated.View>
-            </Animated.View>
-
             {/* artwork/queue toggle */}
             <Animated.View style={[{ width: "100%" }, artworkViewStyle]}>
               {(!showQueue || isQueueTransitioning) && (
                 <>
+                  {/* expanded artwork */}
+                  <Animated.View
+                    style={{
+                      width: ARTWORK_SIZE,
+                      height: ARTWORK_SIZE,
+                      alignSelf: "center",
+                      marginBottom: 32,
+                      marginTop: 10,
+                      borderRadius: 12,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {!isExpanded && (
+                      <Pressable
+                        style={StyleSheet.absoluteFill}
+                        onPress={() => useNowPlayingTransitionStore.getState().expand()}
+                      />
+                    )}
+                    {isAnimating && previousArtworkUrl && (
+                      <Animated.View
+                        style={[styles.artworkLayer, previousArtworkAnimStyle]}
+                      >
+                        <Animated.Image
+                          source={{ uri: previousArtworkUrl }}
+                          style={[styles.artworkImage, imageScaleStyle]}
+                          resizeMode="cover"
+                        />
+                      </Animated.View>
+                    )}
+                    <Animated.View
+                      style={[styles.artworkLayer, currentArtworkAnimStyle]}
+                    >
+                      {thumbnailUrl || pendingUrl ? (
+                        <Animated.Image
+                          source={{ uri: (thumbnailUrl || pendingUrl)! }}
+                          style={[styles.artworkImage, imageScaleStyle]}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.artworkPlaceholder}>
+                          <Ionicons
+                            name="musical-note"
+                            size={isExpanded ? 80 : 18}
+                            color="#424242"
+                          />
+                        </View>
+                      )}
+                      {/* hidden preloader for pending image - triggers swap when loaded */}
+                      {pendingUrl && thumbnailUrl !== pendingUrl && (
+                        <Image
+                          source={{ uri: pendingUrl }}
+                          style={{
+                            position: "absolute",
+                            width: 1,
+                            height: 1,
+                            opacity: 0,
+                          }}
+                          onLoad={handlePendingImageLoad}
+                        />
+                      )}
+                    </Animated.View>
+                  </Animated.View>
                   {/* track info */}
                   <View style={styles.trackInfo}>
                     <Pressable onPress={goToAlbum}>

@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react";
-import { subscribeToPlayback, getPlaybackSnapshot } from "@/src/stores/player";
+import { useProgress, usePlaybackState } from "react-native-track-player";
+import { State } from "react-native-track-player";
 
 export type PlaybackProgress = {
   position: number;
@@ -7,29 +7,18 @@ export type PlaybackProgress = {
   isPlaying: boolean;
 };
 
-// provides real-time playback progress using useSyncExternalStore
-// this ensures proper integration with react's concurrent features
+// provides real-time playback progress using react-native-track-player hooks
 export function usePlaybackProgress(): PlaybackProgress {
-  const status = useSyncExternalStore(
-    subscribeToPlayback,
-    getPlaybackSnapshot,
-    getPlaybackSnapshot
-  );
+  const { position, duration } = useProgress(250);
+  const playbackState = usePlaybackState();
 
-  // derive progress from status - this is fine to create new objects here
-  // since useSyncExternalStore handles the subscription correctly
-  if (!status || !status.isLoaded) {
-    return {
-      position: 0,
-      duration: 0,
-      isPlaying: false,
-    };
-  }
+  const isPlaying = playbackState.state === State.Playing;
 
-  // expo-av uses milliseconds for positionMillis and durationMillis
+  // react-native-track-player uses seconds, convert to milliseconds
+  // for backward compatibility with the rest of the app
   return {
-    position: status.positionMillis,
-    duration: status.durationMillis ?? 0,
-    isPlaying: status.isPlaying,
+    position: position * 1000,
+    duration: duration * 1000,
+    isPlaying,
   };
 }
