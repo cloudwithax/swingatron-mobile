@@ -1,7 +1,13 @@
 // note: this component is deprecated in favor of ExpandablePlayer
 // kept for potential backward compatibility or reference
 
-import { ActivityIndicator, Image, Pressable, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ThemedText } from "@/components/themed-text";
@@ -11,7 +17,7 @@ import { usePlaybackProgress } from "@/hooks/use-playback-progress";
 import { getThumbnailUrl } from "@/src/api/client";
 
 export function MiniPlayer() {
-  // get real-time playback progress directly from expo-audio
+  // get real-time playback progress directly from expo-av
   const { position, duration, isPlaying } = usePlaybackProgress();
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -99,7 +105,9 @@ export function MiniPlayer() {
             <Ionicons
               name="play-skip-back"
               size={22}
-              color={isControlsDisabled ? Palette.textMuted : Palette.textPrimary}
+              color={
+                isControlsDisabled ? Palette.textMuted : Palette.textPrimary
+              }
             />
           </Pressable>
 
@@ -128,7 +136,9 @@ export function MiniPlayer() {
             <Ionicons
               name="play-skip-forward"
               size={22}
-              color={isControlsDisabled ? Palette.textMuted : Palette.textPrimary}
+              color={
+                isControlsDisabled ? Palette.textMuted : Palette.textPrimary
+              }
             />
           </Pressable>
         </View>

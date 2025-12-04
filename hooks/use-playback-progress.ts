@@ -18,7 +18,7 @@ export function usePlaybackProgress(): PlaybackProgress {
 
   // derive progress from status - this is fine to create new objects here
   // since useSyncExternalStore handles the subscription correctly
-  if (!status) {
+  if (!status || !status.isLoaded) {
     return {
       position: 0,
       duration: 0,
@@ -26,11 +26,10 @@ export function usePlaybackProgress(): PlaybackProgress {
     };
   }
 
-  // expo-audio uses seconds for currentTime and duration
-  // convert to milliseconds for backward compatibility with the rest of the app
+  // expo-av uses milliseconds for positionMillis and durationMillis
   return {
-    position: status.currentTime * 1000,
-    duration: status.duration * 1000,
-    isPlaying: status.playing,
+    position: status.positionMillis,
+    duration: status.durationMillis ?? 0,
+    isPlaying: status.isPlaying,
   };
 }

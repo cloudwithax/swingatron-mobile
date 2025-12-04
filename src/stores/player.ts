@@ -1,41 +1,11 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import {
-  createAudioPlayer,
-  setAudioModeAsync,
-  type AudioPlayer,
-  type AudioStatus,
-} from "expo-audio";
+import { Audio, type AVPlaybackStatus } from "expo-av";
 import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Track, RepeatMode } from "../api/types";
 import { logTrackPlayback } from "../api/playback";
-import { getTrackStreamUrl, getThumbnailUrl, getBaseUrl } from "../api/client";
-
-// lock screen metadata type for now playing controls
-// these types aren't exported from expo-audio yet but the runtime supports them
-interface LockScreenMetadata {
-  title?: string;
-  artist?: string;
-  album?: string;
-  artwork?: string;
-}
-
-interface LockScreenOptions {
-  showSeekForward?: boolean;
-  showSeekBackward?: boolean;
-}
-
-// extended audio player interface with lock screen methods
-// the runtime supports these but types aren't in the package yet
-interface ExtendedAudioPlayer extends AudioPlayer {
-  setActiveForLockScreen?: (
-    active: boolean,
-    metadata?: LockScreenMetadata,
-    options?: LockScreenOptions
-  ) => void;
-  clearLockScreenControls?: () => void;
-}
+import { getTrackStreamUrl, getThumbnailUrl } from "../api/client";
 
 // playback status subscriber type for external hooks
 export type PlaybackSubscriber = () => void;
@@ -43,10 +13,10 @@ export type PlaybackSubscriber = () => void;
 const playbackSubscribers = new Set<PlaybackSubscriber>();
 
 // cache the last known status to provide immediate state to new subscribers
-let lastKnownStatus: AudioStatus | null = null;
+let lastKnownStatus: AVPlaybackStatus | null = null;
 
 // get current playback snapshot for useSyncExternalStore
-export function getPlaybackSnapshot(): AudioStatus | null {
+export function getPlaybackSnapshot(): AVPlaybackStatus | null {
   return lastKnownStatus;
 }
 
@@ -61,7 +31,7 @@ export function subscribeToPlayback(
   };
 }
 
-function notifySubscribers(status: AudioStatus): void {
+function notifySubscribers(status: AVPlaybackStatus): void {
   lastKnownStatus = status;
   // notify all subscribers that state changed - they will read from snapshot
   playbackSubscribers.forEach((callback) => callback());
@@ -119,9 +89,8 @@ type PlayerState = {
   closeQueue: () => void;
 };
 
-let player: ExtendedAudioPlayer | null = null;
+let sound: Audio.Sound | null = null;
 let audioConfigured = false;
-let statusSubscription: { remove: () => void } | null = null;
 
 const MIN_PLAY_DURATION_TO_LOG = 30;
 
@@ -136,54 +105,12 @@ let currentSession: PlaybackSession | null = null;
 
 async function configureAudio(): Promise<void> {
   if (!audioConfigured) {
-    await setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: true,
-      interruptionModeAndroid: "duckOthers",
-      interruptionMode: "mixWithOthers",
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: true,
     });
     audioConfigured = true;
-  }
-}
-
-// builds the artwork url for lock screen metadata
-// returns the full url if base url is available, otherwise returns empty string
-async function buildArtworkUrl(image: string | null): Promise<string> {
-  if (!image) return "";
-  const baseUrl = await getBaseUrl();
-  if (!baseUrl) return "";
-  return getThumbnailUrl(image, "large");
-}
-
-// updates the lock screen now playing metadata with current track info
-async function updateLockScreenMetadata(
-  audioPlayer: ExtendedAudioPlayer,
-  track: Track,
-  albumImage: string | null
-): Promise<void> {
-  // check if lock screen controls are available at runtime
-  if (!audioPlayer.setActiveForLockScreen) return;
-
-  try {
-    const imageToUse = albumImage || track.image;
-    const artworkUrl = await buildArtworkUrl(imageToUse);
-    const artistNames =
-      track.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
-
-    const metadata: LockScreenMetadata = {
-      title: track.title,
-      artist: artistNames,
-      album: track.album || undefined,
-      artwork: artworkUrl || undefined,
-    };
-
-    audioPlayer.setActiveForLockScreen(true, metadata, {
-      showSeekForward: true,
-      showSeekBackward: true,
-    });
-  } catch (e) {
-    // lock screen controls not critical, log and continue
-    console.log("[PLAYER] failed to set lock screen metadata:", e);
   }
 }
 
@@ -241,31 +168,29 @@ export const usePlayerStore = create<PlayerState>()(
       albumImage: null,
       imageCacheBuster: Date.now(),
       play: async () => {
-        if (!player) return;
-        player.play();
-        // use the player's current status which is automatically updated
-        notifySubscribers(player.currentStatus);
+        if (!sound) return;
+        const status = await sound.playAsync();
+        notifySubscribers(status);
       },
       pause: async () => {
-        if (!player) return;
-        player.pause();
-        // use the player's current status which is automatically updated
-        notifySubscribers(player.currentStatus);
+        if (!sound) return;
+        const status = await sound.pauseAsync();
+        notifySubscribers(status);
       },
       playPause: async () => {
-        if (!player) return;
-        if (player.playing) {
+        if (!sound) return;
+        const status = await sound.getStatusAsync();
+        if (status.isLoaded && status.isPlaying) {
           await get().pause();
         } else {
           await get().play();
         }
       },
       seekTo: async (position) => {
-        if (!player) return;
-        // expo-audio seekTo uses seconds, not milliseconds
-        await player.seekTo(position / 1000);
-        // use the player's current status which is automatically updated
-        notifySubscribers(player.currentStatus);
+        if (!sound) return;
+        // expo-av uses milliseconds for seek position
+        const status = await sound.setPositionAsync(position);
+        notifySubscribers(status);
         if (currentSession) {
           currentSession.lastPosition = position;
           currentSession.accumulated = 0;
@@ -274,57 +199,55 @@ export const usePlayerStore = create<PlayerState>()(
       },
       setVolume: (volume) => {
         const clamped = Math.max(0, Math.min(1, volume));
-        if (player) {
-          player.volume = clamped;
+        if (sound) {
+          sound.setVolumeAsync(clamped);
         }
         set({ volume: clamped, isMuted: clamped === 0 });
       },
       toggleMute: () => {
         const state = get();
         const nextMuted = !state.isMuted;
-        if (player) {
-          player.muted = nextMuted;
+        if (sound) {
+          sound.setIsMutedAsync(nextMuted);
         }
         set({ isMuted: nextMuted });
       },
       loadTrack: async (track) => {
         await configureAudio();
-        set({ isLoading: true, pendingTrackHash: track.trackhash, pendingTrack: track, error: null });
+        set({
+          isLoading: true,
+          pendingTrackHash: track.trackhash,
+          pendingTrack: track,
+          error: null,
+        });
         try {
-          // stop and remove existing player if any
-          if (player) {
-            // pause playback before removing to prevent audio overlap
-            player.pause();
-            if (statusSubscription) {
-              statusSubscription.remove();
-              statusSubscription = null;
-            }
-            player.remove();
-            player = null;
+          // stop and remove existing sound if any
+          if (sound) {
+            await sound.stopAsync();
+            await sound.unloadAsync();
+            sound = null;
           }
 
           const uri = getTrackStreamUrl(track.trackhash, track.filepath);
 
-          // create new player with expo-audio
-          // cast to extended type for lock screen support
-          player = createAudioPlayer(uri, {
-            updateInterval: 250,
-          }) as ExtendedAudioPlayer;
-          player.volume = get().volume;
-          player.muted = get().isMuted;
-
-          // subscribe to playback status updates
-          statusSubscription = player.addListener(
-            "playbackStatusUpdate",
-            (status: AudioStatus) => {
+          // create new sound with expo-av
+          const { sound: newSound, status } = await Audio.Sound.createAsync(
+            { uri },
+            {
+              shouldPlay: false,
+              volume: get().volume,
+              isMuted: get().isMuted,
+              progressUpdateIntervalMillis: 250,
+            },
+            (status: AVPlaybackStatus) => {
               // notify external hooks for real-time progress updates
               notifySubscribers(status);
 
-              // handle scrobbling (convert seconds to milliseconds for compatibility)
-              if (currentSession && get().currentTrack) {
-                const positionMillis = status.currentTime * 1000;
+              // handle scrobbling - expo-av uses milliseconds directly
+              if (status.isLoaded && currentSession && get().currentTrack) {
+                const positionMillis = status.positionMillis;
                 const delta = positionMillis - currentSession.lastPosition;
-                if (status.playing && delta > 0) {
+                if (status.isPlaying && delta > 0) {
                   currentSession.accumulated += delta;
                   currentSession.lastPosition = positionMillis;
                   void maybeScrobble(get().currentTrack, get().playbackSource);
@@ -332,38 +255,20 @@ export const usePlayerStore = create<PlayerState>()(
               }
 
               // auto-advance to next track when playback ends
-              if (status.didJustFinish && !player?.loop) {
+              if (
+                status.isLoaded &&
+                status.didJustFinish &&
+                !status.isLooping
+              ) {
                 void get().next();
               }
             }
           );
 
-          // wait for the player to be ready
-          await new Promise<void>((resolve) => {
-            if (player?.isLoaded) {
-              resolve();
-              return;
-            }
-            const loadListener = player?.addListener(
-              "playbackStatusUpdate",
-              (status: AudioStatus) => {
-                if (status.isLoaded) {
-                  loadListener?.remove();
-                  resolve();
-                }
-              }
-            );
-            // timeout fallback
-            setTimeout(() => {
-              loadListener?.remove();
-              resolve();
-            }, 5000);
-          });
+          sound = newSound;
 
           // notify subscribers with initial status
-          if (player) {
-            notifySubscribers(player.currentStatus);
-          }
+          notifySubscribers(status);
 
           // update current track but preserve album image from setQueue context
           // only fall back to track.image if albumImage was never set
@@ -394,11 +299,6 @@ export const usePlayerStore = create<PlayerState>()(
           }
 
           startPlaybackSession(track);
-
-          // set up lock screen controls with track metadata
-          if (player) {
-            void updateLockScreenMetadata(player, track, imageToUse);
-          }
         } catch (e) {
           const message =
             e instanceof Error ? e.message : "failed to load track";
@@ -464,7 +364,10 @@ export const usePlayerStore = create<PlayerState>()(
 
         // set pending track immediately so UI can show metadata right away
         const trackToPlay = queue[index];
-        set({ pendingTrackHash: trackToPlay.trackhash, pendingTrack: trackToPlay });
+        set({
+          pendingTrackHash: trackToPlay.trackhash,
+          pendingTrack: trackToPlay,
+        });
         await get().playTrack(trackToPlay);
       },
       addToQueue: (track) => {
@@ -544,11 +447,14 @@ export const usePlayerStore = create<PlayerState>()(
         const state = get();
         if (state.queue.length === 0) return;
 
-        // get current position from player to decide whether to restart or go back
-        // expo-audio uses seconds, convert to milliseconds for comparison
+        // get current position from sound to decide whether to restart or go back
+        // expo-av uses milliseconds
         let currentPosition = 0;
-        if (player) {
-          currentPosition = player.currentTime * 1000;
+        if (sound) {
+          const status = await sound.getStatusAsync();
+          if (status.isLoaded) {
+            currentPosition = status.positionMillis;
+          }
         }
 
         if (currentPosition > 3000) {
@@ -615,23 +521,10 @@ export const usePlayerStore = create<PlayerState>()(
         set({ repeatMode: next });
       },
       clearQueue: async () => {
-        if (player) {
-          // clear lock screen controls before removing player
-          if (player.clearLockScreenControls) {
-            try {
-              player.clearLockScreenControls();
-            } catch {
-              // ignore errors from clearing lock screen
-            }
-          }
-          // pause playback before removing
-          player.pause();
-          if (statusSubscription) {
-            statusSubscription.remove();
-            statusSubscription = null;
-          }
-          player.remove();
-          player = null;
+        if (sound) {
+          await sound.stopAsync();
+          await sound.unloadAsync();
+          sound = null;
         }
         currentSession = null;
         lastKnownStatus = null;
